@@ -1,10 +1,6 @@
 from django.db import models
-from django.contrib.auth import get_user_model
 
-from fusion_auth.user_profile import UserProfile  # noqa – extended profile helper
-
-User = get_user_model()
-
+from core.db.mixins import TimeStampedModel, UserScopedModel
 
 LEAVE_STATUS_CHOICES = [
     ("pending", "Pending"),
@@ -13,7 +9,7 @@ LEAVE_STATUS_CHOICES = [
 ]
 
 
-class LeaveType(models.Model):
+class LeaveType(TimeStampedModel):
     name = models.CharField(max_length=100, unique=True)
     max_days_per_year = models.PositiveIntegerField(default=12)
     carry_forward = models.BooleanField(default=False)
@@ -26,42 +22,57 @@ class LeaveType(models.Model):
         return self.name
 
 
-class LeaveBalance(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="leave_balances")
-    leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE)
+class LeaveBalance(UserScopedModel, TimeStampedModel):
+    leave_type = models.ForeignKey(
+        LeaveType, on_delete=models.CASCADE, related_name="leave_balances"
+    )
     year = models.PositiveSmallIntegerField()
     total_days = models.PositiveIntegerField(default=0)
     used_days = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "elm_leave_balance"
-        unique_together = ("user", "leave_type", "year")
+        unique_together = ("user_id", "leave_type", "year")
 
     @property
-    def remaining_days(self):
+    def remaining_days(self) -> int:
         return self.total_days - self.used_days
 
     def __str__(self):
-        return f"{self.user} - {self.leave_type} ({self.year})"
+        return f"User {self.user_id} - {self.leave_type} ({self.year})"
 
 
-class LeaveRequest(models.Model):
-    employee = models.ForeignKey(User, on_delete=models.CASCADE, related_name="leave_requests")
-    leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE)
+class LeaveRequest(TimeStampedModel):
+    employee_user_id = models.IntegerField(db_index=True)
+    leave_type = models.ForeignKey(
+        LeaveType, on_delete=models.CASCADE, related_name="leave_requests"
+    )
     start_date = models.DateField()
     end_date = models.DateField()
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=LEAVE_STATUS_CHOICES, default="pending")
-    reviewed_by = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_leaves"
+    status = models.CharField(
+        max_length=20, choices=LEAVE_STATUS_CHOICES, default="pending"
     )
+    reviewed_by_user_id = models.IntegerField(null=True, blank=True, db_index=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    remarks = models.TextField(blank=True, default="")
 
     class Meta:
         db_table = "elm_leave_request"
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(start_date__lte=models.F("end_date")),
+                name="elm_request_start_lte_end",
+            )
+        ]
+
+    @property
+    def user_id(self):
+        return self.employee_user_id
 
     def __str__(self):
-        return f"{self.employee} - {self.leave_type} ({self.start_date} to {self.end_date})"
+        return (
+            f"User {self.employee_user_id} - {self.leave_type} "
+            f"({self.start_date} to {self.end_date})"
+        )
