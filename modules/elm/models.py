@@ -1,9 +1,4 @@
 from django.db import models
-from django.contrib.auth import get_user_model
-
-from fusion_auth.user_profile import UserProfile  # noqa – extended profile helper
-
-User = get_user_model()
 
 
 LEAVE_STATUS_CHOICES = [
@@ -27,7 +22,7 @@ class LeaveType(models.Model):
 
 
 class LeaveBalance(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="leave_balances")
+    user_id = models.IntegerField(db_index=True)
     leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE)
     year = models.PositiveSmallIntegerField()
     total_days = models.PositiveIntegerField(default=0)
@@ -35,26 +30,25 @@ class LeaveBalance(models.Model):
 
     class Meta:
         db_table = "elm_leave_balance"
-        unique_together = ("user", "leave_type", "year")
+        unique_together = ("user_id", "leave_type", "year")
 
     @property
     def remaining_days(self):
         return self.total_days - self.used_days
 
     def __str__(self):
-        return f"{self.user} - {self.leave_type} ({self.year})"
+        return f"User {self.user_id} - {self.leave_type} ({self.year})"
 
 
 class LeaveRequest(models.Model):
-    employee = models.ForeignKey(User, on_delete=models.CASCADE, related_name="leave_requests")
+    employee_user_id = models.IntegerField(db_index=True)
     leave_type = models.ForeignKey(LeaveType, on_delete=models.CASCADE)
     start_date = models.DateField()
     end_date = models.DateField()
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=LEAVE_STATUS_CHOICES, default="pending")
-    reviewed_by = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="reviewed_leaves"
-    )
+    remarks = models.TextField(blank=True, default="")
+    reviewed_by_user_id = models.IntegerField(null=True, blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -64,4 +58,4 @@ class LeaveRequest(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.employee} - {self.leave_type} ({self.start_date} to {self.end_date})"
+        return f"Employee {self.employee_user_id} - {self.leave_type} ({self.start_date} to {self.end_date})"
